@@ -1,37 +1,44 @@
 import cv2
-import sys
-from face_detector import FaceDetector
+import time
+from face_analyzer import FaceAnalyzer
 from video_stream import VideoStreamHandler
 
 def main():
-    try:
-        face_detector = FaceDetector()
-        video_stream = VideoStreamHandler()
+    face_analyzer = FaceAnalyzer()
+    video_stream = VideoStreamHandler()
 
-        print("Starting video stream. Press 'q' to quit.")
+    print("Starting video stream. Press 'q' to quit.")
 
-        while True:
-            try:
-                frame = video_stream.read_frame()
-            except ValueError as e:
-                print(f"Error: {e}")
-                print("Please check if your camera is connected and not in use by another application.")
-                break
+    frame_count = 0
+    start_time = time.time()
+    fps = 0
 
-            faces = face_detector.detect_faces(frame)
-            frame_with_faces = face_detector.draw_faces(frame, faces)
+    while True:
+        frame = video_stream.read_frame()
+        frame_count += 1
 
-            video_stream.show_frame(frame_with_faces)
+        faces = face_analyzer.detect_faces(frame)
+        
+        if len(faces) > 0:
+            face = faces[0]
+            analysis = face_analyzer.analyze_face(frame, face)
+            
+            if analysis:
+                frame = face_analyzer.draw_analysis(frame, face, analysis, fps)
 
-            if video_stream.wait_key() == ord('q'):
-                break
+        video_stream.show_frame(frame)
 
-    except Exception as e:
-        print(f"An unexpected error occurred: {e}")
-    finally:
-        if 'video_stream' in locals():
-            video_stream.release()
-        cv2.destroyAllWindows()
+        if video_stream.wait_key(1) == ord('q'):
+            break
+
+        # Calculate FPS every 30 frames
+        if frame_count % 30 == 0:
+            end_time = time.time()
+            fps = 30 / (end_time - start_time)
+            start_time = time.time()
+
+    video_stream.release()
+    cv2.destroyAllWindows()
 
 if __name__ == "__main__":
     main()
