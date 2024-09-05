@@ -7,6 +7,9 @@ class FaceAnalyzer:
     def __init__(self):
         self.face_detector = dlib.get_frontal_face_detector()
         self.predictor = dlib.shape_predictor("models/shape_predictor_68_face_landmarks.dat")
+        self.last_face = None
+        self.last_age_gender = None
+        self.face_threshold = 50  # pixels
 
     def detect_faces(self, frame):
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
@@ -16,32 +19,48 @@ class FaceAnalyzer:
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         return self.predictor(gray, face)
 
+    def is_new_face(self, face):
+        if self.last_face is None:
+            return True
+        current_center = np.array([(face.left() + face.right()) // 2, (face.top() + face.bottom()) // 2])
+        last_center = np.array([(self.last_face.left() + self.last_face.right()) // 2, 
+                                (self.last_face.top() + self.last_face.bottom()) // 2])
+        return np.linalg.norm(current_center - last_center) > self.face_threshold
+
     def analyze_face(self, frame, face):
         x, y, w, h = face.left(), face.top(), face.width(), face.height()
         face_img = frame[y:y+h, x:x+w]
         
+        analysis = {}
+        
+        if self.is_new_face(face):
+            try:
+                deep_analysis = DeepFace.analyze(face_img, actions=['age', 'gender'], enforce_detection=False)
+                self.last_age_gender = {
+                    'age': deep_analysis[0]['age'],
+                    'gender': deep_analysis[0]['dominant_gender']
+                }
+            except Exception as e:
+                print(f"Error in age/gender analysis: {e}")
+                self.last_age_gender = {'age': 'Unknown', 'gender': 'Unknown'}
+            
+            self.last_face = face
+
+        analysis.update(self.last_age_gender)
+
         try:
-            analysis = DeepFace.analyze(face_img, actions=['age', 'gender', 'emotion'], enforce_detection=False)
-            age = analysis[0]['age']
-            gender = analysis[0]['dominant_gender']
-            emotion = analysis[0]['dominant_emotion']
-
-            landmarks = self.get_landmarks(frame, face)
-            left_eye_status = self.get_eye_status(landmarks, 'left')
-            right_eye_status = self.get_eye_status(landmarks, 'right')
-            mouth_status = self.get_mouth_status(landmarks)
-
-            return {
-                'age': age,
-                'gender': gender,
-                'emotion': emotion,
-                'left_eye': left_eye_status,
-                'right_eye': right_eye_status,
-                'mouth': mouth_status
-            }
+            emotion_analysis = DeepFace.analyze(face_img, actions=['emotion'], enforce_detection=False)
+            analysis['emotion'] = emotion_analysis[0]['dominant_emotion']
         except Exception as e:
-            print(f"Error in face analysis: {e}")
-            return None
+            print(f"Error in emotion analysis: {e}")
+            analysis['emotion'] = 'Unknown'
+
+        landmarks = self.get_landmarks(frame, face)
+        analysis['left_eye'] = self.get_eye_status(landmarks, 'left')
+        analysis['right_eye'] = self.get_eye_status(landmarks, 'right')
+        analysis['mouth'] = self.get_mouth_status(landmarks)
+
+        return analysis
 
     def get_eye_status(self, landmarks, eye):
         if eye == 'left':
